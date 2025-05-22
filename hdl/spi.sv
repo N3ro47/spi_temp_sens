@@ -1,4 +1,7 @@
 module spi
+#(
+  parameter BUFFER_BYTES = 4
+)
 (
   input reg sck_in,
 
@@ -6,12 +9,13 @@ module spi
   output reg sck_out,
   output reg mosi,
   output reg cs,
+  output reg dc,
 
-  input wire [3:0]in_bytes_count,
-  input wire [3:0]out_bytes_count,
+  input wire [$clog2(BUFFER_BYTES):0]in_bytes_count,
+  input wire [$clog2(BUFFER_BYTES):0]out_bytes_count,
 
-  input wire [31:0]in_bytes,
-  output reg [31:0]out_bytes,
+  input wire [(BUFFER_BYTES*8) - 1:0]in_bytes,
+  output reg [(BUFFER_BYTES*8) - 1:0]out_bytes,
 
   input wire start_trans,
   output reg trans_done
@@ -40,6 +44,7 @@ module spi
   reg en_out;
 
   initial begin
+    dc            <= 1'b0;
     cs            <= 1'b1;
     sck_out       <= 1'b1;
     mosi          <= 1'b0;
@@ -82,6 +87,7 @@ always @(posedge sck_in) begin
   trans_beg :
       begin
         cs          <= 1'b0;
+        dc          <= 1'b0;
         en_out      <= 1'b0;
 
         next_state  = trans_write;
@@ -99,6 +105,9 @@ always @(posedge sck_in) begin
           next_state = trans_read;
         end
       end else begin
+        if (in_bytes_counter <= in_bytes_count - 1) begin
+          dc <= 1'b1;
+        end
         if (bit_counter == 3'b000) begin
           bit_counter = 3'b111;
 
@@ -135,6 +144,7 @@ always @(posedge sck_in) begin
 
          en_out     <= 1'b1;
          trans_done <= 1'b1;
+         dc         <= 1'b0;
        end
      end
   endcase

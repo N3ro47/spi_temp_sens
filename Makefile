@@ -1,4 +1,4 @@
-V_SRCS := hdl/top.v hdl/sim_top.v hdl/spi.sv hdl/timer.sv hdl/presc.sv hdl/headers/seven_segment_defines.vh hdl/bcd_register.sv hdl/ss_display.sv hdl/counter.sv
+V_SRCS := hdl/top.v hdl/sim_top.v hdl/spi.sv hdl/timer.sv hdl/presc.sv hdl/headers/seven_segment_defines.vh hdl/bcd_register.sv hdl/ss_display.sv hdl/counter.sv hdl/eink_data.sv
 SIM_TOP := sim_top
 SIM_SNAPSHOT := sim_snapshot
 

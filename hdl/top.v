@@ -7,33 +7,72 @@ module top
     output led_0,
     output phy_sck,
     output phy_mosi,
-    output phy_cs,
-    output [2:0]led,
-
-    output [3:0] control_out_pins,
-    output [6:0] display_out_pins
+    output phy_temp_cs,
+    output phy_eink_cs,
+    output phy_adc_cs,
+    output phy_eink_dc,
+    output [2:0]led
   );
 
 wire clk_scaled;
+wire dummy_dc_temp;
 
 wire [15:0]bcd_reg;
-reg [3:0]in_bytes_count;
-reg [3:0]out_bytes_count;
-reg [31:0]in_bytes;
+reg [23:0]in_bytes_count;
+reg [23:0]out_bytes_count;
+
+reg [31999:0]in_bytes;
 wire [31:0]out_bytes;
 
 wire led_inter;
-wire start_trans;
-wire trans_done;
+
+wire start_temp_trans;
+wire start_eink_trans;
+wire start_adc_trans;
+
+wire trans_temp_done;
+wire trans_eink_done;
+wire trans_adc_done;
+
+wire sck_eink;
+wire sck_adc;
+wire sck_temp;
+
+wire miso_eink;
+wire miso_adc;
+wire miso_temp;
+
+wire mosi_eink;
+wire mosi_adc;
+wire mosi_temp;
+
+reg eink_en;
+reg adc_en;
+reg temp_en;
+
+assign phy_miso = (eink_en & miso_eink) | (adc_en & miso_adc) | (temp_en & miso_temp);
+assign phy_sck = (eink_en & sck_eink) | (adc_en & sck_adc) | (temp_en & sck_temp);
+assign phy_mosi = (eink_en & mosi_eink) | (adc_en & mosi_adc) | (temp_en & mosi_temp);
 
 localparam check_con     = 3'b000;
 localparam set_options   = 3'b001;
 localparam chk_options   = 3'b010;
-localparam read_temp     = 3'b011;
+localparam eink_init     = 3'b011;
+localparam read_temp     = 3'b100;
+localparam display_temp  = 3'b101;
+
+localparam eink_xaddr    = 3'b000;
+localparam eink_yaddr    = 3'b001;
+localparam eink_data_s   = 3'b010;
+localparam eink_refr_0   = 3'b011;
+localparam eink_refr_1   = 3'b111;
 
 reg [2:0] cur_state;
+reg [2:0] eink_data_state;
 reg led_reg;
 reg en_dis;
+
+wire[31999:0] eink_data;
 
 assign led_0 = led_reg;
 
@@ -42,17 +81,26 @@ initial begin
   out_bytes_count   =     2'b01;
   in_bytes          =     8'h01;
   led_reg           =     1'b0;
-  cur_state         = check_con;
-  en_dis            = 1'b0;
+  cur_state         =     eink_init;
+  en_dis            =     1'b0;
+  eink_data_state   =     eink_xaddr;
+
+  eink_en           =     1'b0  ;
+  adc_en            =     1'b0  ;
+  temp_en           =     1'b0  ;
 end
 
 assign led = cur_state;
+
+wire trans_done;
+assign trans_done = trans_temp_done | trans_eink_done | trans_adc_done;
 
 always @(posedge trans_done) begin
   case (cur_state)
     check_con:
       begin
         if (out_bytes[7:0] == 8'h03) begin
+          temp_en = 1'b1;
           cur_state   <= set_options;
           in_bytes_count        <= 3;
           out_bytes_count       <= 0;
@@ -78,9 +126,66 @@ always @(posedge trans_done) begin
           out_bytes_count       <= 2'b10;
           in_bytes[7:0]         <= 8'h00;
           if (out_bytes[15:8] == 8'h81 && out_bytes[7:0] == 8'h03) begin
-            cur_state <= read_temp;
+            cur_state <= eink_init;
             en_dis    <= 1'b1;
+            temp_en   <= 1'b0;
+            eink_en   <= 1'b1;
           end
+      end           // Initialisation of temp sensor done
+    eink_init:
+      begin
+        case (eink_data_state) 
+          eink_xaddr:
+          begin
+            in_bytes_count      <= 2;
+            out_bytes_count     <= 0;
+
+            in_bytes[7:0]         <= 8'h4E;
+            in_bytes[15:8]        <= 8'h01;
+
+            eink_data_state     <= eink_yaddr;
+          end
+          eink_yaddr:
+          begin 
+            in_bytes_count      <= 3;
+            out_bytes_count     <= 0;
+
+            in_bytes[7:0]         <= 8'h4F;
+            in_bytes[15:8]        <= 8'h00;
+            in_bytes[23:16]       <= 8'h00;
+
+            eink_data_state     <= eink_data_s;
+          end
+          eink_data_s:
+          begin
+            in_bytes_count        <= 4000;
+            out_bytes_count       <= 0;
+
+            in_bytes              <= eink_data;
+
+            eink_data_state     <= eink_refr_0;
+          end
+          eink_refr_0:
+          begin
+            in_bytes_count        <= 2;
+            out_bytes_count       <= 0;
+
+            in_bytes[7:0]         <= 8'h22;
+            in_bytes[15:8]        <= 8'hF7;
+
+            eink_data_state     <= eink_refr_1;
+          end
+          eink_refr_1:
+          begin
+            in_bytes_count        <= 1;
+            out_bytes_count       <= 0;
+
+            in_bytes[7:0]         <= 8'h20;
+
+            eink_data_state     <= eink_xaddr;
+            cur_state           <= read_temp;
+          end
+        endcase
       end
     read_temp:
       begin
@@ -103,38 +208,64 @@ presc     pre0
 timer     tim0
           (
             .clk_in(sys_clk_pin),
-            .sig_out(start_trans)
+            .sig_out(start_temp_trans)
           );
 
-spi       spi0
+timer     tim1
+          (
+            .clk_in(sys_clk_pin),
+            .sig_out(start_adc_trans)
+          );
+
+timer     tim2
+          (
+            .clk_in(sys_clk_pin),
+            .sig_out(start_eink_trans)
+          );
+
+spi       temp_spi
           (
             .sck_in(clk_scaled),
-            .miso(phy_miso),
-            .sck_out(phy_sck),
-            .mosi(phy_mosi),
-            .cs(phy_cs),
+            .miso(miso_temp),
+            .sck_out(sck_temp),
+            .mosi(mosi_temp),
+            .cs(phy_temp_cs),
+            .dc(dummy_dc_temp),
+            .in_bytes_count(in_bytes_count[2:0]),
+            .out_bytes_count(out_bytes_count[2:0]),
+            .in_bytes(in_bytes[31:0]),
+            .out_bytes(out_bytes),
+            .start_trans(start_temp_trans),
+            .trans_done(trans_temp_done)
+          );
+
+eink_data  e_data
+          (
+            .bcd_values(bcd_reg),
+            .data(eink_data)
+          );
+
+spi #(.BUFFER_BYTES(4000)) eink_spi 
+          (
+            .sck_in(clk_scaled),
+            .miso(miso_eink),
+            .sck_out(sck_eink),
+            .mosi(mosi_eink),
+            .cs(phy_eink_cs),
+            .dc(phy_eink_dc),
             .in_bytes_count(in_bytes_count),
             .out_bytes_count(out_bytes_count),
             .in_bytes(in_bytes),
             .out_bytes(out_bytes),
-            .start_trans(start_trans),
-            .trans_done(trans_done)
+            .start_trans(start_eink_trans),
+            .trans_done(trans_eink_done)
           );
 
 bcd_register reg0
           (
             .spi_data(out_bytes[27:4]),
-            .new_data_triger(trans_done),
+            .new_data_triger(trans_temp_done),
             .bcd_values(bcd_reg)
-          );
-
-ss_display   dis0
-          (
-            .bcd_register(bcd_reg),
-            .clk(sys_clk_pin),
-            .en(en_dis),
-            .control_pins(control_out_pins),
-            .display_pins(display_out_pins)
           );
 
 endmodule
