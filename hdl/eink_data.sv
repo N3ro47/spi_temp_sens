@@ -1,10 +1,13 @@
 module eink_data(
   input wire[15:0] bcd_values,
-
+  input wire[11:0] humidty value, // MIN-0x650 MAX-0xD40
   output wire[31999:0] data
 );
 
 var[7:0] int_data[0:249][0:15];
+
+reg [11:0] humidity_bcd;   // 3 BCD digits for humidity (0-100%)
+reg [7:0]  temperature_bcd; // 2 BCD digits for temperature (0-99)
 
 genvar i, j;
 generate
@@ -15,10 +18,141 @@ generate
   end
 endgenerate
 
+localparam [7:0] digit_font [0:9][0:7] = '{
+    // 0
+    '{8'b00111100,
+      8'b01100110,
+      8'b01101110,
+      8'b01110110,
+      8'b01100110,
+      8'b01100110,
+      8'b00111100,
+      8'b00000000},
+    // 1
+    '{8'b00011000,
+      8'b00111000,
+      8'b00011000,
+      8'b00011000,
+      8'b00011000,
+      8'b00011000,
+      8'b01111110,
+      8'b00000000},
+    // 2
+    '{8'b00111100,
+      8'b01100110,
+      8'b00000110,
+      8'b00001100,
+      8'b00110000,
+      8'b01100000,
+      8'b01111110,
+      8'b00000000},
+    // 3
+    '{8'b00111100,
+      8'b01100110,
+      8'b00000110,
+      8'b00011100,
+      8'b00000110,
+      8'b01100110,
+      8'b00111100,
+      8'b00000000},
+    // 4
+    '{8'b00001100,
+      8'b00011100,
+      8'b00111100,
+      8'b01101100,
+      8'b01111110,
+      8'b00001100,
+      8'b00001100,
+      8'b00000000},
+    // 5
+    '{8'b01111110,
+      8'b01100000,
+      8'b01111100,
+      8'b00000110,
+      8'b00000110,
+      8'b01100110,
+      8'b00111100,
+      8'b00000000},
+    // 6
+    '{8'b00111100,
+      8'b01100110,
+      8'b01100000,
+      8'b01111100,
+      8'b01100110,
+      8'b01100110,
+      8'b00111100,
+      8'b00000000},
+    // 7
+    '{8'b01111110,
+      8'b01100110,
+      8'b00000110,
+      8'b00001100,
+      8'b00011000,
+      8'b00011000,
+      8'b00011000,
+      8'b00000000},
+    // 8
+    '{8'b00111100,
+      8'b01100110,
+      8'b01100110,
+      8'b00111100,
+      8'b01100110,
+      8'b01100110,
+      8'b00111100,
+      8'b00000000},
+    // 9
+    '{8'b00111100,
+      8'b01100110,
+      8'b01100110,
+      8'b00111110,
+      8'b00000110,
+      8'b01100110,
+      8'b00111100,
+      8'b00000000}
+};
+
+// x: horizontal position (column), y: vertical position (row, top of digit)
+task automatic draw_digit(
+    input [3:0] digit,   // BCD digit 0-9
+    input integer x,     // x position (column)
+    input integer y      // y position (row)
+);
+    integer row;
+    begin
+        for (row = 0; row < 8; row = row + 1) begin
+            int_data[y + row][x] = digit_font[digit][row];
+        end
+    end
+endtask
+
+function automatic [11:0] humidity_to_bcd_percent(
+    input [11:0] humidity_raw
+);
+    integer percent;
+    begin
+        if (12'hD40 > 12'h650)
+            percent = ((humidity_raw - 12'h650) * 100) / (12'hD40 - 12'h650);
+        else
+            percent = 0;
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+        humidity_to_bcd_percent[11:8] = percent / 100;         // Hundreds
+        humidity_to_bcd_percent[7:4]  = (percent / 10) % 10;   // Tens
+        humidity_to_bcd_percent[3:0]  = percent % 10;          // Ones
+    end
+endfunction
+
 always @(*) begin
     // Here insert assignments based on bcd values
     // decimal 
     // MIN-0x650 MAX-0xD40
+    draw_digit(humidity_bcd[11:8], 2, 10);
+    draw_digit(humidity_bcd[7:4],  3, 10);
+    draw_digit(humidity_bcd[3:0],  4, 10);
+
+    // Example: display temperature_bcd[7:4] at (2, 20)
+    draw_digit(temperature_bcd[7:4], 2, 20);
+    draw_digit(temperature_bcd[3:0], 3, 20);
 end
 
 initial begin
@@ -278,3 +412,4 @@ initial begin
 end
 
 endmodule
+
