@@ -31,6 +31,7 @@ synth:
 	vivado -mode batch -script tcl/synth.tcl
 
 impl:
+	rm -rf spi_temp_sens.bit
 	vivado -mode batch -script tcl/impl.tcl
 
 flash:
