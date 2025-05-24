@@ -38,8 +38,8 @@ module spi
 
   reg [2:0] next_state;
 
-  reg [3:0] in_bytes_counter;
-  reg [3:0] out_bytes_counter;
+  reg [19:0] in_bytes_counter;
+  reg [19:0] out_bytes_counter;
 
   reg en_out;
 
@@ -154,7 +154,7 @@ end
 
 always @(negedge sck_in) begin
   if (cur_state == trans_write) begin
-    mosi <= in_bytes[(in_bytes_counter - 1)*8 + bit_counter];
+    mosi <= in_bytes[(in_bytes_count - in_bytes_counter)*8 + bit_counter];
   end
 end
 

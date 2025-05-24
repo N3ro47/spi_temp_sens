@@ -1,9 +1,11 @@
-module timer (
-              input wire clk_in,
-              output reg sig_out
+module timer #(
+                parameter time_ms = 1000
+             )
+             (
+                input wire clk_in,
+                output reg sig_out
              );
 
-parameter time_ms = 1000;
 
 localparam clk_per_ms = 180000;
 localparam reset_count = (clk_per_ms*time_ms);
