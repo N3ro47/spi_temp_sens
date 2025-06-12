@@ -32,9 +32,9 @@ wire [31:0]out_bytes;
 
 wire led_inter;
 
-wire start_temp_trans;
-wire start_eink_trans;
-wire start_adc_trans;
+reg start_temp_trans;
+reg start_eink_trans;
+reg start_adc_trans;
 
 wire trans_temp_done;
 wire trans_eink_done;
@@ -45,6 +45,7 @@ localparam set_options   = 3'b001;
 localparam chk_options   = 3'b010;
 localparam eink_init     = 3'b011;
 localparam read_temp     = 3'b100;
+localparam read_adc      = 3'b110;
 localparam display_temp  = 3'b101;
 
 localparam eink_xaddr    = 3'b000;
@@ -62,6 +63,8 @@ wire[31999:0] eink_data;
 
 assign led_0 = led_reg;
 
+wire adv_sm;
+
 initial begin
   in_bytes_count    =     2'b01;
   out_bytes_count   =     2'b01;
@@ -72,12 +75,12 @@ initial begin
   eink_data_state   =     eink_xaddr;
 end
 
+reg [23:0]temp_data;
+reg [15:0]adc_data;
+
 assign led = cur_state;
 
-wire trans_done;
-assign trans_done = trans_temp_done | trans_eink_done | trans_adc_done;
-
-always @(posedge trans_done) begin
+always @(posedge adv_sm) begin
   case (cur_state)
     check_con:
       begin
@@ -90,6 +93,7 @@ always @(posedge trans_done) begin
           in_bytes[23:16]       <= 8'h80;
         end
         led_reg     <= ~led_reg;
+        start_temp_trans = ~start_temp_trans;
       end
     set_options:
       begin
@@ -100,6 +104,7 @@ always @(posedge trans_done) begin
           in_bytes[23:16]       <= 8'h80;
           led_reg               <= 1'b1;
           cur_state             <= chk_options;
+          start_temp_trans = ~start_temp_trans;
       end
     chk_options:
       begin
@@ -110,12 +115,34 @@ always @(posedge trans_done) begin
             cur_state <= eink_init;
             en_dis    <= 1'b1;
           end
+          start_temp_trans = ~start_temp_trans;
       end           // Initialisation of temp sensor done
+    read_temp:
+      begin
+          start_temp_trans = ~start_temp_trans;
+          in_bytes_count        <= 2'b01;
+          out_bytes_count       <= 2'b10;
+          in_bytes[7:0]         <= 8'h0C;
+          if (out_bytes[15:8] == 8'h81 && out_bytes[7:0] == 8'h03) begin
+            cur_state <= read_temp;
+          end
+      end
+    read_adc:
+      begin
+          temp_data             <= out_bytes[23:0];
+          in_bytes_count        <= 2'b00;
+          out_bytes_count       <= 2'b10;
+
+          cur_state             <= eink_init;
+          start_adc_trans       <= ~start_adc_trans;
+      end
     eink_init:
       begin
         case (eink_data_state) 
           eink_xaddr:
           begin
+            temp_data             <= out_bytes[15:0];
+
             led_reg               <= 1'b0;
             in_bytes_count        <= 2;
             out_bytes_count       <= 0;
@@ -124,6 +151,8 @@ always @(posedge trans_done) begin
             in_bytes[15:8]        <= 8'h01;
 
             eink_data_state       <= eink_yaddr;
+            start_eink_trans = ~start_eink_trans;
+
           end
           eink_yaddr:
           begin 
@@ -135,6 +164,8 @@ always @(posedge trans_done) begin
             in_bytes[23:16]       <= 8'h00;
 
             eink_data_state       <= eink_data_s;
+            start_eink_trans = ~start_eink_trans;
+
           end
           eink_data_s:
           begin
@@ -143,6 +174,8 @@ always @(posedge trans_done) begin
 
             in_bytes[7:0]         <= 8'h24;
             in_bytes[32007:8]     <= eink_data;
+
+            start_eink_trans = ~start_eink_trans;
 
             eink_data_state       <= eink_refr_0;
           end
@@ -154,6 +187,9 @@ always @(posedge trans_done) begin
             in_bytes[7:0]         <= 8'h22;
             in_bytes[15:8]        <= 8'hF7;
 
+
+            start_eink_trans = ~start_eink_trans;
+
             eink_data_state       <= eink_refr_1;
           end
           eink_refr_1:
@@ -164,18 +200,13 @@ always @(posedge trans_done) begin
             in_bytes[7:0]         <= 8'h20;
 
             eink_data_state       <= eink_xaddr;
+
+
+            cur_state             <= read_temp;
             led_reg               <= 1'b1;
+
           end
         endcase
-      end
-    read_temp:
-      begin
-          in_bytes_count        <= 2'b01;
-          out_bytes_count       <= 2'b10;
-          in_bytes[7:0]         <= 8'h0C;
-          if (out_bytes[15:8] == 8'h81 && out_bytes[7:0] == 8'h03) begin
-            cur_state <= read_temp;
-          end
       end
   endcase
 end
@@ -186,39 +217,27 @@ presc#(.VALUE(127))     pre0
             .clk_out_p(clk_scaled)
           );
 
-timer     tim0
+timer#(.time_ms(400))   tim_sb
           (
             .clk_in(sys_clk_pin),
-            .sig_out(start_temp_trans)
+            .sig_out(adv_sm)
           );
 
-timer     tim1
+spi       temp_spi
           (
-            .clk_in(sys_clk_pin),
-            .sig_out(start_adc_trans)
+            .sck_in(clk_scaled),
+            .miso(phy_miso_temp),
+            .sck_out(phy_sck_temp),
+            .mosi(phy_mosi_temp),
+            .cs(phy_temp_cs),
+            .dc(dummy_dc_temp),
+            .in_bytes_count(in_bytes_count[2:0]),
+            .out_bytes_count(out_bytes_count[2:0]),
+            .in_bytes(in_bytes[31:0]),
+            .out_bytes(out_bytes),
+            .start_trans(start_temp_trans),
+            .trans_done(trans_temp_done)
           );
-
-timer     tim2
-          (
-            .clk_in(sys_clk_pin),
-            .sig_out(start_eink_trans)
-          );
-
-//spi       temp_spi
-//          (
-//            .sck_in(clk_scaled),
-//            .miso(miso_temp),
-//            .sck_out(sck_temp),
-//            .mosi(mosi_temp),
-//            .cs(phy_temp_cs),
-//            .dc(dummy_dc_temp),
-//            .in_bytes_count(in_bytes_count[2:0]),
-//            .out_bytes_count(out_bytes_count[2:0]),
-//            .in_bytes(in_bytes[31:0]),
-//            .out_bytes(out_bytes),
-//            .start_trans(start_temp_trans),
-//            .trans_done(trans_temp_done)
-//          );
 
 eink_data  e_data
           (
