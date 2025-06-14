@@ -7,7 +7,7 @@
 #define MIN_ADC 0x650
 #define MAX_ADC 0xD40
 
-#define SPI_RX_PIN  10
+#define SPI_RX_PIN  12
 #define SPI_TX_PIN  11
 #define SPI_CS_PIN  13
 #define SPI_SCK_PIN 10
@@ -41,8 +41,6 @@ int main() {
     out_buf[1] = (result >> 8) & 0xFF;
 
     printf("Raw value: 0x%03x, humidity: %f%% \n", result, (1.0f -(result-(float)MIN_ADC)/((float)MAX_ADC-(float)MIN_ADC))*100);
-
-    spi_write_read_blocking(spi1, out_buf, in_buf, 2);
   }
 
   return 0;

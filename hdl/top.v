@@ -30,6 +30,18 @@ reg [23:0]out_bytes_count;
 reg [32007:0]in_bytes;
 wire [31:0]out_bytes;
 
+reg [31:0]in_bytes_temp;
+wire [31:0]out_bytes_temp;
+
+reg [4:0]in_bytes_count_temp;
+reg [4:0]out_bytes_count_temp;
+
+reg [31:0]in_bytes_adc;
+wire [31:0]out_bytes_adc;
+
+reg [4:0]in_bytes_count_adc;
+reg [4:0]out_bytes_count_adc;
+
 wire led_inter;
 
 reg start_temp_trans;
@@ -68,9 +80,11 @@ wire adv_sm;
 initial begin
   in_bytes_count    =     2'b01;
   out_bytes_count   =     2'b01;
-  in_bytes          =     8'h01;
+  in_bytes_count_temp    =     2'b01;
+  out_bytes_count_temp   =     2'b01;
+  in_bytes_temp          =     8'h01;
   led_reg           =     1'b0;
-  cur_state         =     eink_init;
+  cur_state         =     set_options;
   en_dis            =     1'b0;
   eink_data_state   =     eink_xaddr;
 end
@@ -86,46 +100,45 @@ always @(posedge adv_sm) begin
       begin
         if (out_bytes[7:0] == 8'h03) begin
           cur_state   <= set_options;
-          in_bytes_count        <= 3;
-          out_bytes_count       <= 0;
-          in_bytes[7:0]         <= 8'h03;
-          in_bytes[15:8]        <= 8'h81;
-          in_bytes[23:16]       <= 8'h80;
+          in_bytes_count_temp        <= 3;
+          out_bytes_count_temp       <= 0;
+          in_bytes_temp[7:0]         <= 8'h80;
+          in_bytes_temp[15:8]        <= 8'h81;
+          in_bytes_temp[23:16]       <= 8'h03;
         end
         led_reg     <= ~led_reg;
         start_temp_trans = ~start_temp_trans;
       end
     set_options:
       begin
-          in_bytes_count        <= 3;
-          out_bytes_count       <= 0;
-          in_bytes[7:0]         <= 8'h03;
-          in_bytes[15:8]        <= 8'h81;
-          in_bytes[23:16]       <= 8'h80;
+          in_bytes_count_temp        <= 3;
+          out_bytes_count_temp       <= 0;
+          in_bytes_temp[7:0]         <= 8'h80;
+          in_bytes_temp[15:8]        <= 8'h81;
+          in_bytes_temp[23:16]       <= 8'h03;
           led_reg               <= 1'b1;
           cur_state             <= chk_options;
           start_temp_trans = ~start_temp_trans;
       end
     chk_options:
       begin
-          in_bytes_count        <= 2'b01;
-          out_bytes_count       <= 2'b10;
-          in_bytes[7:0]         <= 8'h00;
-          if (out_bytes[15:8] == 8'h81 && out_bytes[7:0] == 8'h03) begin
-            cur_state <= eink_init;
+          in_bytes_count_temp        <= 2'b01;
+          out_bytes_count_temp       <= 2'b10;
+          in_bytes_temp[7:0]         <= 8'h00;
+          if (out_bytes_temp[15:8] == 8'h81 && out_bytes_temp[7:0] == 8'h03) begin
+            cur_state <= read_temp;
             en_dis    <= 1'b1;
           end
           start_temp_trans = ~start_temp_trans;
       end           // Initialisation of temp sensor done
     read_temp:
       begin
+          in_bytes_count_temp        <= 2'b01;
+          out_bytes_count_temp       <= 2'b10;
+          in_bytes_temp[7:0]         <= 8'h0C;
+
           start_temp_trans = ~start_temp_trans;
-          in_bytes_count        <= 2'b01;
-          out_bytes_count       <= 2'b10;
-          in_bytes[7:0]         <= 8'h0C;
-          if (out_bytes[15:8] == 8'h81 && out_bytes[7:0] == 8'h03) begin
-            cur_state <= read_temp;
-          end
+          cur_state <= read_adc;
       end
     read_adc:
       begin
@@ -198,9 +211,9 @@ always @(posedge adv_sm) begin
             out_bytes_count       <= 0;
 
             in_bytes[7:0]         <= 8'h20;
+            start_eink_trans = ~start_eink_trans;
 
             eink_data_state       <= eink_xaddr;
-
 
             cur_state             <= read_temp;
             led_reg               <= 1'b1;
@@ -231,17 +244,34 @@ spi       temp_spi
             .mosi(phy_mosi_temp),
             .cs(phy_temp_cs),
             .dc(dummy_dc_temp),
-            .in_bytes_count(in_bytes_count[2:0]),
-            .out_bytes_count(out_bytes_count[2:0]),
-            .in_bytes(in_bytes[31:0]),
-            .out_bytes(out_bytes),
+            .in_bytes_count(in_bytes_count_temp),
+            .out_bytes_count(out_bytes_count_temp),
+            .in_bytes(in_bytes_temp),
+            .out_bytes(out_bytes_temp),
             .start_trans(start_temp_trans),
             .trans_done(trans_temp_done)
+          );
+
+spi       adc_spi
+          (
+            .sck_in(clk_scaled),
+            .miso(phy_miso_adc),
+            .sck_out(phy_sck_adc),
+            .mosi(phy_mosi_adc),
+            .cs(phy_adc_cs),
+            .dc(dummy_dc_adc),
+            .in_bytes_count(in_bytes_count_adc),
+            .out_bytes_count(out_bytes_count_adc),
+            .in_bytes(in_bytes_adc),
+            .out_bytes(out_bytes_adc),
+            .start_trans(start_adc_trans),
+            .trans_done(trans_adc_done)
           );
 
 eink_data  e_data
           (
             .bcd_values(bcd_reg),
+            .humidity_value(in_bytes_adc[11:0]),
             .data(eink_data)
           );
 
@@ -263,7 +293,7 @@ spi #(.BUFFER_BYTES(4001)) eink_spi
 
 bcd_register reg0
           (
-            .spi_data(out_bytes[27:4]),
+            .spi_data(out_bytes_temp[27:4]),
             .new_data_triger(trans_temp_done),
             .bcd_values(bcd_reg)
           );

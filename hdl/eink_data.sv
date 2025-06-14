@@ -1,13 +1,13 @@
 module eink_data(
   input wire[15:0] bcd_values,
-  input wire[11:0] humidty_value, // MIN-0x650 MAX-0xD40
+  input wire[11:0] humidity_value, // MIN-0x650 MAX-0xD40
   output wire[31999:0] data
 );
 
 var[7:0] int_data[0:249][0:15];
 
 reg [11:0] humidity_bcd;   // 3 BCD digits for humidity (0-100%)
-reg [15:0]  temperature_bcd; // 4 BCD digits for temperature (0-99)
+reg [15:0] temperature_bcd; // 4 BCD digits for temperature (0-99)
 
 genvar i, j;
 generate
@@ -146,14 +146,14 @@ always @(*) begin
     // Here insert assignments based on bcd values
     // decimal 
     // MIN-0x650 MAX-0xD40
-    humidity_bcd = humidity_to_bcd_percent(humidty_value);
+    humidity_bcd = humidity_to_bcd_percent(humidity_value);
 
     draw_digit(humidity_bcd[11:8], 3, 130);
     draw_digit(humidity_bcd[7:4],  2, 130);
     draw_digit(humidity_bcd[3:0],  1, 130);
 
-    draw_digit(temperature_bcd[7:4], 3, 117);
-    draw_digit(temperature_bcd[3:0], 2, 117);
+    draw_digit(bcd_values[7:4], 3, 117);
+    draw_digit(bcd_values[3:0], 2, 117);
 end
 
 initial begin
